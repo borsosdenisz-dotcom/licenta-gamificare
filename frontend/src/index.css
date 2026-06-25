@@ -1,0 +1,10 @@
+@import "tailwindcss";
+/* Animația pentru bara de progres de la succes înregistrare */
+@keyframes loading {
+  0% { width: 0%; }
+  100% { width: 100%; }
+}
+
+.animate-loading {
+  animation: loading 3.5s ease-in-out forwards;
+}
