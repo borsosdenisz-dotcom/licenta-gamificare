@@ -7,7 +7,10 @@ const UserSchema = new mongoose.Schema({
   score: { type: Number, default: 0 },
   integrity: { type: Number, default: 100 },
   badges: { type: [String], default: ["🛡️ Recruit"] },
-  completedMissions: { type: [Number], default: [] }
+  completedMissions: { type: [Number], default: [] },
+  passedMissions: { type: [Number], default: [] },
+  reactionTimes: { type: [Number], default: [] },
+  failedCategories: { type: [String], default: [] }
 });
 
 module.exports = mongoose.model('User', UserSchema);

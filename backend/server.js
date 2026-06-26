@@ -5,15 +5,12 @@ const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
-const crypto = require('crypto'); // Pentru Hash Chaining
+const crypto = require('crypto'); 
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ==========================================
-// 🛡️ MIDDLEWARE: RATE LIMITING (ANTI-BRUTE)
-// ==========================================
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 5,
@@ -22,16 +19,9 @@ const loginLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// ==========================================
-// 🔌 CONEXIUNE BAZĂ DE DATE
-// ==========================================
 mongoose.connect('mongodb://127.0.0.1:27017/gamificare_db')
   .then(() => console.log("🔥 DB: CONECTAT LOCAL MONGODB"))
   .catch(err => console.error("❌ EROARE CONEXIUNE DB:", err));
-
-// ==========================================
-// 🏗️ SCHEME ȘI MODELE MONGOOSE
-// ==========================================
 
 const AuditLog = mongoose.model('AuditLog', new mongoose.Schema({
   action: String,   
@@ -62,6 +52,7 @@ const User = mongoose.model('User', new mongoose.Schema({
   integrity: { type: Number, default: 100 }, 
   badges: [String], 
   completedMissions: [Number],
+  passedMissions: [Number],
   reactionTimes: [Number],
   failedCategories: [String],
   loginAttempts: { type: Number, default: 0 },
@@ -81,9 +72,6 @@ const Campaign = mongoose.model('Campaign', new mongoose.Schema({
   }]
 }));
 
-// ==========================================
-// 🛡️ SECURITATE: LOGARE IMUTABILĂ (HASH CHAIN)
-// ==========================================
 const logSecurityEvent = async (action, userName, details, req = null) => {
   try {
     const lastLog = await AuditLog.findOne().sort({ timestamp: -1 });
@@ -103,13 +91,8 @@ const logSecurityEvent = async (action, userName, details, req = null) => {
   } catch (e) { console.error("Eroare Audit:", e); }
 };
 
-// ==========================================
-// 🛡️ MIDDLEWARE: RBAC (AUTORIZARE)
-// ==========================================
 const authorize = (roles = []) => {
   return (req, res, next) => {
-    // În frontend va trebui să trimiți header-ul: Authorization: Bearer <token>
-    // Pentru test rapid poți folosi: x-role: ADMIN
     const userRole = req.headers['x-role'] || 'EMPLOYEE'; 
     
     if (roles.length && !roles.includes(userRole)) {
@@ -120,9 +103,18 @@ const authorize = (roles = []) => {
   };
 };
 
-// ==========================================
-// 🛡️ RUTE DE AUTENTIFICARE
-// ==========================================
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  
+  if (!token) return res.sendStatus(401);
+
+  jwt.verify(token, process.env.JWT_SECRET || 'secret_key', (err, user) => {
+    if (err) return res.sendStatus(403);
+    req.user = user;
+    next();
+  });
+};
 
 app.post('/api/auth/register', async (req, res) => {
   try {
@@ -209,11 +201,35 @@ app.post('/api/auth/verify-mfa', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ==========================================
-// 📊 RUTE ADMIN PROTEJATE (RBAC)
-// ==========================================
+app.get('/api/user/profile', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ error: "Utilizator negăsit" });
+    
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
-// Doar ADMIN și ANALYST pot vedea audit-ul
+app.post('/api/user/sync', authenticateToken, async (req, res) => {
+  try {
+    const { 
+      level, xp, score, integrity, badges, 
+      reactionTimes, failedCategories, completedMissions, passedMissions 
+    } = req.body;
+    
+    await User.findByIdAndUpdate(req.user.id, {
+      level, xp, score, integrity, badges, 
+      reactionTimes, failedCategories, completedMissions, passedMissions
+    });
+    
+    res.json({ success: true, message: "Progres salvat cu succes!" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/logs', authorize(['ADMIN', 'ANALYST']), async (req, res) => {
   const logs = await AuditLog.find().sort({ timestamp: -1 }).limit(100);
   res.json(logs);
@@ -241,10 +257,6 @@ app.delete('/api/campaigns', authorize(['ADMIN']), async (req, res) => {
   await logSecurityEvent('DATABASE_WIPE', 'ADMIN', 'Toate campaniile șterse.', req);
   res.json({ success: true });
 });
-
-// ==========================================
-// 🤖 MODUL AI (GEMINI)
-// ==========================================
 
 app.post('/api/generate-threat', async (req, res) => {
   try {
